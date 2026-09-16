@@ -46,16 +46,13 @@
 #include "tusb_edpt_handler.h"
 #include "DAP.h"
 #include "hardware/structs/usb.h"
+#include "vtarget.h"
 
 // UART0 for debugprobe debug
 // UART1 for debugprobe to target device
 
 static uint8_t TxDataBuffer[CFG_TUD_HID_EP_BUFSIZE];
-static uint8_t RxDataBuffer[CFG_TUD_HID_EP_BUFSIZE];
 
-#define THREADED 1
-
-#define UART_TASK_PRIO (tskIDLE_PRIORITY + 3)
 #define TUD_TASK_PRIO  (tskIDLE_PRIORITY + 2)
 #define DAP_TASK_PRIO  (tskIDLE_PRIORITY + 1)
 
@@ -151,6 +148,7 @@ int main(void) {
     board_init();
     usb_serial_init();
     cdc_uart_init();
+    vtarget_init();
     tusb_init();
     stdio_uart_init();
 
@@ -158,33 +156,17 @@ int main(void) {
 
     probe_info("Welcome to debugprobe!\n");
 
-    if (THREADED) {
-        xTaskCreate(usb_thread, "TUD", configMINIMAL_STACK_SIZE, NULL, TUD_TASK_PRIO, &tud_taskhandle);
+    xTaskCreate(usb_thread, "TUD", configMINIMAL_STACK_SIZE, NULL, TUD_TASK_PRIO, &tud_taskhandle);
 #if (configNUMBER_OF_CORES > 1)
-        vTaskCoreAffinitySet(tud_taskhandle, (1 << 0));
+    vTaskCoreAffinitySet(tud_taskhandle, (1 << 0));
 #endif
 #if PICO_RP2040
-        xTaskCreate(dev_mon, "WDOG", configMINIMAL_STACK_SIZE, NULL, TUD_TASK_PRIO, &mon_taskhandle);
+    xTaskCreate(dev_mon, "WDOG", configMINIMAL_STACK_SIZE, NULL, TUD_TASK_PRIO, &mon_taskhandle);
 #if (configNUMBER_OF_CORES > 1)
-        vTaskCoreAffinitySet(mon_taskhandle, (1 << 0));
+    vTaskCoreAffinitySet(mon_taskhandle, (1 << 0));
 #endif
 #endif
-        vTaskStartScheduler();
-    }
-
-    while (!THREADED) {
-        tud_task();
-        cdc_task();
-
-#if (PROBE_DEBUG_PROTOCOL == PROTO_DAP_V2)
-        if (tud_vendor_available()) {
-            uint32_t resp_len;
-            tud_vendor_read(RxDataBuffer, sizeof(RxDataBuffer));
-            resp_len = DAP_ProcessCommand(RxDataBuffer, TxDataBuffer);
-            tud_vendor_write(TxDataBuffer, resp_len);
-        }
-#endif
-    }
+    vTaskStartScheduler();
 
     return 0;
 }
@@ -257,7 +239,7 @@ void tud_suspend_cb(bool remote_wakeup_en)
   probe_info("Suspended\n");
   /* Were we actually configured? If not, threads don't exist */
   if (was_configured) {
-	  vTaskSuspend(uart_taskhandle);
+	  cdc_uart_suspend_tasks();
 	  vTaskSuspend(dap_taskhandle);
     if (autobaud_running)
       autobaud_wait_stop();
@@ -270,7 +252,7 @@ void tud_resume_cb(void)
 {
   probe_info("Resumed\n");
   if (was_configured) {
-    vTaskResume(uart_taskhandle);
+    cdc_uart_resume_tasks();
     vTaskResume(dap_taskhandle);
     vTaskResume(autobaud_taskhandle);
   }
@@ -279,9 +261,9 @@ void tud_resume_cb(void)
 void tud_unmount_cb(void)
 {
   probe_info("Disconnected/reset\n");
-  vTaskSuspend(uart_taskhandle);
+  cdc_uart_suspend_tasks();
   vTaskSuspend(dap_taskhandle);
-  vTaskDelete(uart_taskhandle);
+  cdc_uart_delete_tasks();
   vTaskDelete(dap_taskhandle);
   if (autobaud_running)
     autobaud_wait_stop();
@@ -295,7 +277,7 @@ void tud_mount_cb(void)
   probe_info("Connected, Configured: %d\n", !!was_configured);
   if (!was_configured) {
     /* UART needs to preempt USB as if we don't, characters get lost */
-    xTaskCreate(cdc_thread, "UART", configMINIMAL_STACK_SIZE, NULL, UART_TASK_PRIO, &uart_taskhandle);
+    cdc_uart_start_tasks();
     /* Lowest priority thread is debug - need to shuffle buffers before we can toggle swd... */
     xTaskCreate(dap_thread, "DAP", configMINIMAL_STACK_SIZE, NULL, DAP_TASK_PRIO, &dap_taskhandle);
     /* Autobaud detection using PIO as a frequency counter */
@@ -303,7 +285,6 @@ void tud_mount_cb(void)
 #if(configNUMBER_OF_CORES > 1)
     vTaskCoreAffinitySet(autobaud_taskhandle, (1 << 1));
     vTaskCoreAffinitySet(dap_taskhandle, (1 << 1));
-    vTaskCoreAffinitySet(uart_taskhandle, (1 << 0));
 #endif
     was_configured = 1;
   }

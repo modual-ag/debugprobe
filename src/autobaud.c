@@ -46,8 +46,8 @@ static PIO pio;
 static int sm = -1;
 // PIO program offset
 static int offset = -1;
-// UART RX GPIO 1 pin
-static const uint rx_pin = PROBE_UART_RX;
+// Autobaud only applies to the ESP32 bridge (CDC 0) - see cdc_uart.c
+static const uint rx_pin = PROBE_UART0_RX;
 
 // Frequency hash table to store samples occurance
 static HashTable *freq_table;
@@ -242,7 +242,7 @@ uint estimate_baud_rate() {
             // Calculate baud from average of 1-bit times
             float avg_bit_time = (float) bit_time_sum / (float) bit_time_count;
             float new_baud = PIO_CLOCK_FREQUENCY / avg_bit_time;
-            // If baud has changed, send updated baud information to cdc_thread
+            // If baud has changed, send updated baud information to the ESP32 bridge task
             if (baud_changed(new_baud, baud)) {
                 float completeness = 1.0f - expf(-(float) total_samples / 40.0f);
                 float noise_ratio = (float) outlier_count / (float) bit_time_count;
@@ -330,7 +330,7 @@ bool autobaud_init() {
         autobaud_deinit();
         return false;
     }
-    // Create queue to send baud information to cdc_thread
+    // Create queue to send baud information to the ESP32 bridge task
     baudQueue = xQueueCreate(1, sizeof(BaudInfo_t));
     if (!baudQueue) {
         autobaud_deinit();

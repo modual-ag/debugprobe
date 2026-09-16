@@ -30,20 +30,21 @@ void bi_decl_config()
 #endif
 
 #ifdef PROBE_CDC_UART
-    bi_decl(bi_program_feature("PROBE UART INTERFACE " STR(PROBE_UART_INTERFACE)));
-    bi_decl(bi_program_feature("PROBE UART BAUDRATE " STR(PROBE_UART_BAUDRATE)));
-    bi_decl(bi_1pin_with_name(PROBE_UART_TX, "PROBE UART TX"));
-    bi_decl(bi_1pin_with_name(PROBE_UART_RX, "PROBE UART RX"));
-#endif
+    bi_decl(bi_program_feature("PROBE UART0 (ESP32) INTERFACE " STR(PROBE_UART0_INTERFACE)));
+    bi_decl(bi_program_feature("PROBE UART0 (ESP32) BAUDRATE " STR(PROBE_UART0_BAUDRATE)));
+    bi_decl(bi_1pin_with_name(PROBE_UART0_TX, "PROBE UART0 TX"));
+    bi_decl(bi_1pin_with_name(PROBE_UART0_RX, "PROBE UART0 RX"));
+    bi_decl(bi_1pin_with_name(PROBE_UART0_DTR, "PROBE UART0 nDTR (ESP32 EN)"));
+    bi_decl(bi_1pin_with_name(PROBE_UART0_RTS, "PROBE UART0 nRTS (ESP32 IO0)"));
 
-#ifdef PROBE_UART_CTS
-    bi_decl(bi_1pin_with_name(PROBE_UART_CTS, "PROBE UART CTS"));
+    bi_decl(bi_program_feature("PROBE UART1 (LOG) INTERFACE " STR(PROBE_UART1_INTERFACE)));
+    bi_decl(bi_program_feature("PROBE UART1 (LOG) BAUDRATE " STR(PROBE_UART1_BAUDRATE)));
+    bi_decl(bi_1pin_with_name(PROBE_UART1_TX, "PROBE UART1 TX"));
+    bi_decl(bi_1pin_with_name(PROBE_UART1_RX, "PROBE UART1 RX"));
+#ifdef PROBE_UART1_HWFC
+    bi_decl(bi_1pin_with_name(PROBE_UART1_CTS, "PROBE UART1 CTS"));
+    bi_decl(bi_1pin_with_name(PROBE_UART1_RTS, "PROBE UART1 RTS"));
 #endif
-#ifdef PROBE_UART_RTS
-    bi_decl(bi_1pin_with_name(PROBE_UART_RTS, "PROBE UART RTS"));
-#endif
-#ifdef PROBE_UART_DTR
-    bi_decl(bi_1pin_with_name(PROBE_UART_DTR, "PROBE UART DTR"));
 #endif
 
 }

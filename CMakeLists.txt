@@ -25,6 +25,7 @@ add_executable(debugprobe
         src/sw_dp_pio.c
         src/tusb_edpt_handler.c
         src/autobaud.c
+        src/vtarget.c
 )
 
 target_sources(debugprobe PRIVATE
@@ -81,6 +82,10 @@ if (DEBUG_ON_PICO)
     else ()
         message(SEND_ERROR "Unsupported board ${PICO_BOARD}")
     endif ()
+else ()
+    set_target_properties(debugprobe PROPERTIES
+        OUTPUT_NAME "universalflasher"
+    )
 endif ()
 
 
@@ -94,6 +99,7 @@ target_link_libraries(debugprobe PRIVATE
         hardware_dma
         hardware_irq
         hardware_clocks
+        hardware_adc
         FreeRTOS-Kernel
         FreeRTOS-Kernel-Heap1
 )
