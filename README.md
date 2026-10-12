@@ -1,79 +1,139 @@
-# Debugprobe
+# UniversalFlasher firmware
 
-Firmware source for the Raspberry Pi Debug Probe SWD/UART accessory. Can also be run on a Raspberry Pi Pico or Pico 2.
+Firmware for the UniversalFlasher board: an RP2040-based programmer that flashes and debugs ESP32 and SWD (e.g. STM32) targets over a single USB-C cable.
 
-[Raspberry Pi Debug Probe product page](https://www.raspberrypi.com/products/debug-probe/)
+It is a fork of Raspberry Pi's [debugprobe](https://github.com/raspberrypi/debugprobe) (v2.3.1), extended with a second UART bridge and ESP32 auto-reset.
 
-[Raspberry Pi Pico product page](https://www.raspberrypi.com/products/raspberry-pi-pico/)
+## What the host sees
 
-[Raspberry Pi Pico 2 product page](https://www.raspberrypi.com/products/raspberry-pi-pico-2/)
+The board enumerates as one composite USB device (VID:PID `2e8a:000c`) with three functions:
 
-# Documentation
+| Function | Appears as | Used for |
+|---|---|---|
+| CMSIS-DAP v2 | USB vendor interface (WinUSB on Windows, no driver needed) | OpenOCD, pyOCD, probe-rs → SWD targets on J103 |
+| CDC 0 "ESP32 Flash Port" | Serial port | esptool / PlatformIO / Arduino → ESP32 on J101 |
+| CDC 1 "Debug Log UART" | Serial port | Terminal → log UART on J102 |
 
-Debug Probe documentation can be found at the [Raspberry Pi documentation](https://www.raspberrypi.com/documentation/microcontrollers/debug-probe.html#about-the-debug-probe) and in the [Getting Started with Pico PDF](https://pip.raspberrypi.com/documents/RP-008276-DS).
+On macOS, the ports appear as `/dev/cu.usbmodemXXXX2` (CDC 0) and `/dev/cu.usbmodemXXXX4` (CDC 1). On Linux they appear as `/dev/ttyACM*`. Install [udev/99-universalflasher.rules](udev/99-universalflasher.rules) to get the stable names `/dev/probe-esp32` and `/dev/probe-log`.
 
-# Hacking
+## Connectors
 
-For the purpose of making changes or studying of the code, you may want to compile the code yourself.
+All target connectors are 2×5 1.27 mm headers. Target I/O is 3.3 V only.
 
-First, clone the repository:
+**J101 – ESP32 (UART boot)**
+
+| Pin | Signal | Pin | Signal |
+|---|---|---|---|
+| 1 | +5 V (fused) | 2 | USB D+ (to CN101) |
+| 3 | TXD → ESP32 RX | 4 | EN |
+| 5 | GND | 6 | GND |
+| 7 | BOOT (IO0) | 8 | RXD ← ESP32 TX |
+| 9 | USB D− (to CN101) | 10 | +5 V (fused) |
+
+Pins 2 and 9 pass through to the second USB-C connector (CN101), so the native USB of an ESP32-S3/C3/C6 can be used with a second cable.
+
+**J102 – Log UART**
+
+| Pin | Signal | Pin | Signal |
+|---|---|---|---|
+| 1 | GND | 2 | TXD → target RX |
+| 3 | RXD ← target TX | 4 | +5 V (fused) |
+| 5 | RTS → target CTS | 6 | CTS ← target RTS |
+
+**J103 – SWD** (standard ARM 10-pin Cortex debug pinout)
+
+| Pin | Signal | Pin | Signal |
+|---|---|---|---|
+| 1 | VTref (target 3.3 V) | 2 | SWDIO |
+| 3 | GND | 4 | SWCLK |
+| 5 | GND | 6 | SWO (not connected) |
+| 9 | GND | 10 | nRESET |
+
+**J100** (Tag-Connect TC2050) is SWD for the RP2040 itself. You can use it to recover the board with an external probe.
+
+## Buttons and LEDs
+
+| | Function |
+|---|---|
+| SW100 | RP2040 BOOTSEL (hold while plugging in USB to update the firmware) |
+| SW101 | ESP32 EN (reset) |
+| SW102 | ESP32 BOOT (IO0) |
+
+| LED | GPIO | Meaning |
+|---|---|---|
+| D104 | – | 3.3 V power |
+| D103 | – | USB overvoltage |
+| D107 | 2 | USB configured by host |
+| D108 | 3 | ESP32 UART activity |
+| D109 / D110 | 18 / 17 | Log UART RX / TX activity |
+| D111 | 15 | Debugger connected (CMSIS-DAP) |
+| D112 | 16 | Target running (CMSIS-DAP) |
+
+## Usage
+
+### ESP32 (CDC 0)
+
+The bridge drives EN and IO0 through the usual cross-coupled transistor pair, the same way a CP2102/CH340 dev board does. Standard tools reset the chip into the bootloader automatically:
+
 ```
-git clone https://github.com/raspberrypi/debugprobe
-cd debugprobe
+esptool --port /dev/cu.usbmodemXXXX2 chip-id
+esptool --port /dev/cu.usbmodemXXXX2 -b 921600 write-flash 0x0 firmware.bin
 ```
-Initialize and update the submodules:
-```
- git submodule update --init --recursive
-```
-Then create and switch to the build directory:
-```
- mkdir build
- cd build
-```
-If your environment doesn't contain `PICO_SDK_PATH`, then either add it to your environment variables with `export PICO_SDK_PATH=/path/to/sdk` or add `-DPICO_SDK_PATH=/path/to/sdk` to the arguments to CMake below.
 
-Run cmake and build the code:
-```
- cmake ..
- make
-```
-Done! You should now have a `debugprobe.uf2` that you can upload to your Debug Probe via the UF2 bootloader.
+For PlatformIO, set `upload_port` and `monitor_port` to the CDC 0 port. No reset options are needed.
 
-## Building for the Pico 1
+Opening the port in a serial monitor doesn't reset the target. Opening it asserts DTR and RTS together, which leaves both EN and IO0 released.
 
-If you want to create the version that runs on the Pico, then you need to invoke `cmake` in the sequence above with the `DEBUG_ON_PICO=ON` option:
-```
-cmake -DDEBUG_ON_PICO=ON ..
-```
-This will build with the configuration for the Pico and call the output program `debugprobe_on_pico.uf2`, as opposed to `debugprobe.uf2` for the accessory hardware.
-
-Note that if you first ran through the whole sequence to compile for the Debug Probe, then you don't need to start back at the top. You can just go back to the `cmake` step and start from there.
-
-## Building for the Pico 2
-
-If using an existing debugprobe clone:
-- You must completely regenerate your build directory, or use a different one.
-- You must also sync and update submodules.
-- `PICO_SDK_PATH` must point to a version 2.0.0 or greater install.
+### SWD (CMSIS-DAP)
 
 ```
-git submodule sync
+openocd -f interface/cmsis-dap.cfg -f target/stm32f4x.cfg
+pyocd list
+probe-rs list
+```
+
+Use the target config that matches your MCU. The CMSIS-DAP interface drives nRESET on J103 pin 10.
+
+### Log UART (CDC 1)
+
+The log UART is a plain serial port with hardware RTS/CTS flow control. The bridge only runs while the port is open (DTR asserted). An unconnected CTS input is pulled to the active level, so flow control can be left unwired.
+
+### AutoBaud (CDC 0)
+
+Set the ESP32 port to the custom baud rate `9728` (`0x2600`). The bridge then measures the incoming data and follows the target's baud rate. Setting any other baud rate turns AutoBaud off.
+
+## Updating the board firmware
+
+1. Hold **SW100** and plug in USB. The board mounts as a drive called `RPI-RP2`.
+2. Copy `universalflasher.uf2` onto it. The board reboots into the new firmware.
+
+## Building
+
+You need CMake, an `arm-none-eabi` toolchain that includes newlib (the [Arm GNU Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads); Homebrew's `arm-none-eabi-gcc` is not enough), and [Pico SDK](https://github.com/raspberrypi/pico-sdk) 2.x.
+
+```
+git clone https://github.com/raspberrypi/pico-sdk.git --branch 2.1.1 ~/pico-sdk
+git -C ~/pico-sdk submodule update --init
+export PICO_SDK_PATH=~/pico-sdk
+
 git submodule update --init --recursive
-mkdir build-pico2
-cd build-pico2
-cmake -DDEBUG_ON_PICO=1 -DPICO_BOARD=pico2 ../
+mkdir build && cd build
+cmake ..
+make -j8
 ```
-This will build with the configuration for the Pico 2 and call the output program `debugprobe_on_pico2.uf2`.
 
-# AutoBaud
+The output is `build/universalflasher.uf2`.
 
-Mode which automatically detects and sets the UART baud rate as data arrives.
+## Repository layout
 
-To enable AutoBaud, configure the USB CDC port to the following custom baud rate:
-```
-9728 (0x2600)
-```
-> **Note:** Some Linux serial tools cannot set custom baud values. PuTTY on Windows and any terminal that supports arbitrary baud rates works.
+| Path | Contents |
+|---|---|
+| [include/board_universalflasher_config.h](include/board_universalflasher_config.h) | Pin map for this board |
+| [src/cdc_uart.c](src/cdc_uart.c) | The two USB-UART bridges, DTR/RTS auto-reset |
+| [src/usb_descriptors.c](src/usb_descriptors.c) | USB interfaces (CMSIS-DAP + 2× CDC) |
+| [src/vtarget.c](src/vtarget.c) | Target voltage sense (J103 pin 1, ADC3) |
+| [BRINGUP.md](BRINGUP.md) | Bring-up checklist for a new board |
 
-Changing the baud rate to any other value disables AutoBaud.
+## License
 
+MIT, as upstream. See [LICENSE](LICENSE).

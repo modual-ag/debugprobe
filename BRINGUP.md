@@ -1,89 +1,42 @@
-# Bring-up: UniversalFlasher (RP2040_Flash.SchDoc)
+# Bring-up checklist
 
-What to do, in order, the moment the assembled board arrives. This assumes nothing has
-been flashed yet and nothing is proven on real hardware — see the "cannot be proven in
-software" list at the bottom before trusting anything beyond this sequence.
+Steps for a freshly assembled UniversalFlasher board.
 
-## 1. First flash (no debugger needed)
+## 1. First flash
 
-The RP2040 on this board is bare silicon (`SC0914(13)`), not a Pico module — there is no
-pre-existing UF2 bootloader button behavior to rely on beyond BOOTSEL itself.
+1. Hold **SW100** (BOOTSEL) and plug in USB on CN100.
+2. The board mounts as `RPI-RP2`. Copy `universalflasher.uf2` onto it.
+3. The board reboots. D104 (power) and D107 (USB configured) light up.
 
-1. Hold the BOOTSEL button (SW102, tied to the RP2040's boot-select strap) while applying
-   power, or while pressing the RUN/reset button (SW100).
-2. The board enumerates as a plain USB mass-storage drive (`RPI-RP2` or similar).
-3. Drag `universalflasher.uf2` onto it. It resets and boots the new firmware automatically.
+If `RPI-RP2` doesn't appear, check the USB data lines and the 12 MHz crystal (X100). You can also reach the RP2040 over SWD on J100 with an external probe.
 
-## 2. What the host should see next
+## 2. USB enumeration
 
-One composite USB device, VID `0x2E8A`:
+The host should see one device, `2e8a:000c` "UniversalFlasher (CMSIS-DAP)", with a CMSIS-DAP v2 interface and two serial ports.
 
-| Interface | Appears as | For |
-|---|---|---|
-| CMSIS-DAP v2 (vendor, WinUSB) | Not a COM port | OpenOCD / pyOCD → STM32 SWD |
-| CDC 0 ("ESP32 Flash Port") | COM port / `/dev/ttyACM*` | esptool → ESP32 |
-| CDC 1 ("Debug Log UART") | COM port / `/dev/ttyACM*` | Log terminal |
+- macOS: `ls /dev/cu.usbmodem*` shows two ports.
+- Linux: `lsusb -v -d 2e8a:000c` and `ls /dev/ttyACM*`.
+- Windows: two COM ports appear in Device Manager, and the CMSIS-DAP interface binds to WinUSB without needing Zadig.
 
-Check the three USB status LEDs come up as expected (LED_USB_CON should light once the
-host finishes enumeration — see the LED table in the PR/summary this file accompanies).
+## 3. ESP32 (J101, CDC 0)
 
-## 3. SWD sanity check (STM32)
+1. Connect the target to J101 (3.3 V logic, common GND).
+2. Run `esptool --port <CDC 0> chip-id`. It should report the chip type and MAC.
+3. Run `esptool --port <CDC 0> -b 921600 flash-id`. This exercises the baud rate switch.
+4. Flash a firmware image and open the port in a serial monitor. The target must not reset when the monitor opens.
 
-With an STM32 target wired to the J103 SWD header:
+If step 2 can't connect, test the reset path on its own. Hold SW102 (BOOT), tap SW101 (EN), and run `esptool --before no-reset chip-id`.
 
-```
-openocd -f interface/cmsis-dap.cfg -f target/stm32f1x.cfg   # or whatever target family
-```
+## 4. SWD (J103)
 
-(swap the target cfg for your actual STM32 family). Confirm it attaches and can halt/read
-memory. This is the single highest-risk item in the whole board — if it fails, check
-GPIO13/14 continuity against the schematic before suspecting firmware, since a reversed
-SWDIO/SWDI wiring error here is silent (probe enumerates fine, SWD just never responds).
+1. Connect the target to J103. The target must be powered, and J103 pin 1 must see its 3.3 V rail.
+2. Run `openocd -f interface/cmsis-dap.cfg -f target/<family>.cfg`. OpenOCD should find the DAP and the target.
+3. Halt the target, read memory, then flash and verify an image.
+4. Run `reset halt` to check the nRESET line (J103 pin 10).
 
-## 4. ESP32 auto-reset check
+D111 lights while a debugger is connected. D112 lights while the target is running.
 
-With an ESP32 wired to J101:
+## 5. Log UART (J102, CDC 1)
 
-```
-esptool.py --port <CDC0 port> chip_id
-```
-
-If auto-reset doesn't drop the target into the bootloader, try `esptool.py --before
-default_reset` or `--before no_reset` plus a manual BOOT/EN button press (SW101/SW102 on
-the DUT side, not the RP2040's own BOOTSEL) to isolate whether it's a timing issue or a
-polarity issue. Polarity is one `!` in `cdc_uart.c`'s `tud_cdc_line_state_cb`, not a
-board respin, if it turns out inverted.
-
-## 5. Log UART + flow control check
-
-Open the CDC1 port at a working baud rate and confirm bytes flow both ways. If you have a
-target that asserts CTS, confirm the RP2040 actually throttles instead of overrunning at
-high baud (this cannot be verified without real target hardware asserting flow control).
-
-## 6. VTARGET sanity check
-
-No USB-visible readout exists yet (see the open question in the PR/summary about whether
-you want one exposed). To sanity-check the ADC path on the bench, temporarily enable
-`probe_info` in `probe_config.h` and add a print of `vtarget_read_mv()` — expect roughly
-target-rail-voltage in mV with the target powered, and near 0 with it unpowered.
-
-## 7. If the USB path is dead
-
-The board exposes RP2040 SWD + RUN on a separate Tag-Connect (TC2050-IDC) footprint
-(J100), independent of the onboard CMSIS-DAP circuitry. A second, external SWD probe can
-recover/reflash the RP2040 through J100 even if the primary USB/CMSIS-DAP path is
-non-functional.
-
----
-
-## Cannot be proven in software — confirm these on the bench
-
-- Windows enumerates all three interfaces and binds WinUSB to the CMSIS-DAP interface
-  without Zadig.
-- Both COM ports appear with correct labels and stable numbering across replug.
-- OpenOCD actually attaches over `interface/cmsis-dap.cfg` to a real STM32.
-- esptool auto-reset works end-to-end (see §4) — most likely source of bring-up trouble.
-- Flow control on the log UART actually throttles at high baud under real load.
-- SWD signal integrity at full target clock speed.
-- Both COM ports usable simultaneously under sustained load without starving each other.
-- The passive pass-through port (CN101) correctly enumerates a native ESP32-S3/C3/C6.
+1. Short TXD and RXD on J102 (pins 2 and 3), open CDC 1 in a terminal and type. The characters should echo back.
+2. With a real target, check data in both directions. If the target uses flow control, also check that RTS/CTS throttle at high baud rates.

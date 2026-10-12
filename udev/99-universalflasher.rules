@@ -1,25 +1,14 @@
-# udev rules for the UniversalFlasher RP2040 multi-target flasher/debugger.
+# udev rules for the UniversalFlasher.
 #
 # Install:
 #   sudo cp 99-universalflasher.rules /etc/udev/rules.d/
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
 #
-# VID:PID 2e8a:000c is the stock Raspberry Pi "Debug Probe (CMSIS-DAP)" pair,
-# kept unchanged (see usb_descriptors.c) so upstream OpenOCD's
-# interface/cmsis-dap.cfg matches this board without extra configuration.
-#
-# Interface numbers below come from usb_descriptors.c's ITF_NUM_* enum:
-#   0 = CMSIS-DAP v2 (vendor/WinUSB, not a tty)
-#   1,2 = CDC 0 - ESP32 flash/console UART
-#   3,4 = CDC 1 - debug log UART
+# Interfaces: 0 = CMSIS-DAP v2, 1/2 = CDC 0 (ESP32), 3/4 = CDC 1 (log UART)
 
-# Stable symlinks for the two CDC-ACM ports, keyed off the CDC *control*
-# interface number so the mapping doesn't depend on enumeration order.
+# Stable names for the two serial ports
 SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000c", ENV{ID_USB_INTERFACE_NUM}=="01", SYMLINK+="probe-esp32"
 SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000c", ENV{ID_USB_INTERFACE_NUM}=="03", SYMLINK+="probe-log"
 
-# Let non-root users (member of the plugdev group) access the raw USB device
-# node for the CMSIS-DAP vendor interface, so OpenOCD/pyOCD don't need sudo.
-# Adjust GROUP to whatever group your distro uses for USB device access if
-# it isn't plugdev (e.g. some distros use "dialout" or a distro-specific group).
+# Allow OpenOCD/pyOCD/probe-rs access without root
 SUBSYSTEM=="usb", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000c", MODE="0666", GROUP="plugdev", TAG+="uaccess"
