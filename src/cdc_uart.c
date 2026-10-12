@@ -33,10 +33,12 @@
 #include "cdc_uart.h"
 
 /*
- * Generalised from the original single-UART cdc_uart.c into an array of
- * bridges, one per CDC interface. See board_universalflasher_config.h for
- * why bridge 0 (ESP32) uses software DTR/RTS and bridge 1 (log) uses
- * hardware flow control - the two are mutually exclusive on a single UART.
+ * One USB CDC-ACM <-> UART bridge per CDC interface:
+ *   CDC 0: ESP32 UART. DTR/RTS are plain GPIOs driving the EN/IO0
+ *          auto-reset transistors.
+ *   CDC 1: Log UART with hardware CTS/RTS flow control.
+ * The PL011 can't do hardware RTS and host-controlled RTS at the same time,
+ * which is why these are two separate UARTs.
  */
 
 #define DEBOUNCE_MS 40
@@ -54,15 +56,10 @@ typedef struct {
     bool hwfc;
     uint cts_pin, rts_pin; /* valid when hwfc */
 
-    /* Software modem-control outputs; -1 if unused. */
+    /* Software modem-control outputs, active low. -1 if unused. */
     int dtr_gpio, rts_gpio;
-    /*
-     * Classic CDC-ACM semantics suspend UART polling while DTR is low (port
-     * "not open"). The ESP32 bridge instead uses DTR/RTS purely as the
-     * esptool reset control lines (S4.3 of the spec) - esptool pulses DTR
-     * low as part of the reset sequence while still needing bytes to flow,
-     * so that bridge must NOT suspend on DTR low.
-     */
+    /* Treat DTR as "port open" and pause the bridge while it is low. Off for
+     * the ESP32 bridge, where DTR is a reset line toggled by esptool. */
     bool suspend_on_dtr_low;
     bool autobaud_capable;
 
@@ -124,9 +121,7 @@ static cdc_uart_bridge_t bridges[CDC_UART_NUM_BRIDGES] = {
     },
 };
 
-/* Combined-LED-safe update: writes each debounce state once, OR'd together
- * when tx_led/rx_led alias the same GPIO (the ESP32 bridge's single
- * "activity" LED), so TX and RX don't clobber each other's indication. */
+/* tx_led and rx_led may be the same GPIO (the ESP32 activity LED). */
 static void bridge_update_leds(cdc_uart_bridge_t *b, bool tx_active, bool rx_active)
 {
     if (tx_active)
@@ -208,6 +203,14 @@ void cdc_uart_init(void)
     }
 }
 
+/* tud_cdc_n_connected() means "DTR asserted". esptool releases DTR at the
+ * end of its reset sequence and then expects data to flow, so bridges that
+ * use DTR as a reset line are open whenever the device is configured. */
+static bool bridge_is_open(cdc_uart_bridge_t *b)
+{
+    return b->suspend_on_dtr_low ? tud_cdc_n_connected(b->itf) : tud_ready();
+}
+
 static bool bridge_task(cdc_uart_bridge_t *b)
 {
     uint rx_len = 0;
@@ -219,7 +222,7 @@ static bool bridge_task(cdc_uart_bridge_t *b)
         b->rx_buf[rx_len++] = uart_getc(b->uart);
     }
 
-    if (tud_cdc_n_connected(b->itf)) {
+    if (bridge_is_open(b)) {
         b->was_connected = 1;
         int written = 0;
         /* Implicit overflow if we don't write all the bytes to the host.
@@ -285,6 +288,9 @@ static void bridge_set_baudrate(cdc_uart_bridge_t *b, uint32_t baudrate)
     tud_cdc_n_read_flush(b->itf);
 
     uart_init(b->uart, baudrate);
+    /* uart_init() resets the block, which also clears CTS/RTS enables */
+    if (b->hwfc)
+        uart_set_hw_flow(b->uart, true, true);
 }
 
 static void bridge_thread(void *ptr)
@@ -359,7 +365,8 @@ void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const *line_coding)
     uint data_bits, stop_bits;
 
     /* Modifying state, so park the thread before changing it. */
-    if (tud_cdc_n_connected(itf))
+    bool open = bridge_is_open(b);
+    if (open)
         vTaskSuspend(b->task_handle);
 
     bridge_set_baudrate(b, line_coding->bit_rate);
@@ -410,7 +417,7 @@ void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const *line_coding)
     uart_set_format(b->uart, data_bits, stop_bits, parity);
     /* Windows likes to arbitrarily set/get line coding after dtr/rts changes, so
      * don't resume if we shouldn't */
-    if (tud_cdc_n_connected(itf))
+    if (open)
         vTaskResume(b->task_handle);
 }
 
@@ -418,8 +425,8 @@ void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
 {
     cdc_uart_bridge_t *b = &bridges[itf];
 
-    /* Active-low, mimicking a CP2102's DTR#/RTS# pins (see board config /
-     * spec S4.3 for the ESP32 bridge's cross-coupled reset circuit). */
+    /* Active low, like the DTR#/RTS# pins of a USB-UART bridge chip. On the
+     * ESP32 bridge these drive the cross-coupled EN/IO0 reset transistors. */
     if (b->rts_gpio >= 0)
         gpio_put(b->rts_gpio, !rts);
     if (b->dtr_gpio >= 0)

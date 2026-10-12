@@ -48,9 +48,6 @@
 #include "hardware/structs/usb.h"
 #include "vtarget.h"
 
-// UART0 for debugprobe debug
-// UART1 for debugprobe to target device
-
 static uint8_t TxDataBuffer[CFG_TUD_HID_EP_BUFSIZE];
 
 #define TUD_TASK_PRIO  (tskIDLE_PRIORITY + 2)
@@ -150,7 +147,6 @@ int main(void) {
     cdc_uart_init();
     vtarget_init();
     tusb_init();
-    stdio_uart_init();
 
     DAP_Setup();
 

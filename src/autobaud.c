@@ -46,7 +46,7 @@ static PIO pio;
 static int sm = -1;
 // PIO program offset
 static int offset = -1;
-// Autobaud only applies to the ESP32 bridge (CDC 0) - see cdc_uart.c
+// Autobaud is only available on the ESP32 UART (CDC 0)
 static const uint rx_pin = PROBE_UART0_RX;
 
 // Frequency hash table to store samples occurance

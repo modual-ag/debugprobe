@@ -66,15 +66,12 @@ uint8_t const * tud_descriptor_device_cb(void)
 // Configuration Descriptor
 //--------------------------------------------------------------------+
 
-// ITF_NUM_PROBE must stay interface 0: the MS OS 2.0 descriptor below binds
-// WinUSB to it "by first interface number", and index 0 doesn't move no
-// matter how many CDC interfaces are appended after it.
 enum
 {
   ITF_NUM_PROBE, // Old versions of Keil MDK only look at interface 0
-  ITF_NUM_CDC0_COM,  // ESP32 flash port
+  ITF_NUM_CDC0_COM,  // ESP32 UART
   ITF_NUM_CDC0_DATA,
-  ITF_NUM_CDC1_COM,  // Debug log UART
+  ITF_NUM_CDC1_COM,  // Log UART
   ITF_NUM_CDC1_DATA,
   ITF_NUM_TOTAL
 };
@@ -119,9 +116,9 @@ uint8_t desc_configuration[] =
   // Bulk
   TUD_VENDOR_DESCRIPTOR(ITF_NUM_PROBE, 0, DAP_OUT_EP_NUM, DAP_IN_EP_NUM, 64),
 #endif
-  // Interface 1 + 2: CDC 0, ESP32 flash port
+  // Interface 1 + 2: CDC 0, ESP32 UART
   TUD_CDC_DESCRIPTOR(ITF_NUM_CDC0_COM, 6, CDC0_NOTIFICATION_EP_NUM, 64, CDC0_DATA_OUT_EP_NUM, CDC0_DATA_IN_EP_NUM, 64),
-  // Interface 3 + 4: CDC 1, debug log UART
+  // Interface 3 + 4: CDC 1, log UART
   TUD_CDC_DESCRIPTOR(ITF_NUM_CDC1_COM, 7, CDC1_NOTIFICATION_EP_NUM, 64, CDC1_DATA_OUT_EP_NUM, CDC1_DATA_IN_EP_NUM, 64),
 };
 
@@ -131,10 +128,7 @@ uint8_t desc_configuration[] =
 uint8_t const * tud_descriptor_configuration_cb(uint8_t index)
 {
   (void) index; // for multiple configurations
-  /* Hack in CAP_BREAK support for both CDC blocks. Byte 30 within a
-   * TUD_CDC_DESCRIPTOR block is bmCapabilities in the ACM functional
-   * descriptor (see upstream comment this replaces - offset math is
-   * 8+9+5+5+4-1 from the start of the block). */
+  /* Hack in CAP_BREAK support for both CDC interfaces */
   uint32_t cdc_base = CONFIG_TOTAL_LEN - 2 * TUD_CDC_DESC_LEN;
   desc_configuration[cdc_base + 8 + 9 + 5 + 5 + 4 - 1] = 0x6;
   desc_configuration[cdc_base + TUD_CDC_DESC_LEN + 8 + 9 + 5 + 5 + 4 - 1] = 0x6;

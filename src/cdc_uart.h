@@ -26,17 +26,14 @@
 #ifndef CDC_UART_H
 #define CDC_UART_H
 
-// CDC 0: ESP32 flash/console UART, software DTR/RTS -> EN/IO0 auto-reset.
-// CDC 1: debug log UART, hardware CTS/RTS flow control.
+// CDC 0: ESP32 UART with DTR/RTS auto-reset
+// CDC 1: log UART with hardware flow control
 #define CDC_UART_BRIDGE_ESP32 0
 #define CDC_UART_BRIDGE_LOG   1
 #define CDC_UART_NUM_BRIDGES  2
 
 void cdc_uart_init(void);
 
-// Per-bridge task lifecycle, driven from the TinyUSB mount/suspend/resume/
-// unmount callbacks in main.c (mirrors the single-UART original 1:1, just
-// applied to every bridge instead of one global task/handle).
 void cdc_uart_start_tasks(void);
 void cdc_uart_suspend_tasks(void);
 void cdc_uart_resume_tasks(void);

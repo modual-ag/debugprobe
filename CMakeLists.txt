@@ -66,28 +66,12 @@ target_compile_definitions (debugprobe PRIVATE
 	PICO_RP2040_USB_DEVICE_ENUMERATION_FIX=1
 )
 
-option (DEBUG_ON_PICO "Compile firmware for the Pico instead of Debug Probe" OFF)
-if (DEBUG_ON_PICO)
-    target_compile_definitions (debugprobe PRIVATE
-	DEBUG_ON_PICO=1
-    )
-    if (PICO_BOARD STREQUAL "pico")
-        set_target_properties(debugprobe PROPERTIES
-            OUTPUT_NAME "debugprobe_on_pico"
-        )
-    elseif (PICO_BOARD STREQUAL "pico2")
-        set_target_properties(debugprobe PROPERTIES
-            OUTPUT_NAME "debugprobe_on_pico2"
-        )
-    else ()
-        message(SEND_ERROR "Unsupported board ${PICO_BOARD}")
-    endif ()
-else ()
-    set_target_properties(debugprobe PROPERTIES
-        OUTPUT_NAME "universalflasher"
-    )
-endif ()
+set_target_properties(debugprobe PROPERTIES
+    OUTPUT_NAME "universalflasher"
+)
 
+# GPIO0/1 (the SDK's default stdio UART) are the ESP32 UART on this board
+pico_enable_stdio_uart(debugprobe 0)
 
 target_link_libraries(debugprobe PRIVATE
         pico_multicore
