@@ -1,139 +1,156 @@
-# UniversalFlasher firmware
+# RP2040 debug probe with ESP32 flashing
 
-Firmware for the UniversalFlasher board: an RP2040-based programmer that flashes and debugs ESP32 and SWD (e.g. STM32) targets over a single USB-C cable.
+Firmware for an RP2040-based programmer that flashes and debugs ESP32 and SWD (e.g. STM32) targets over a
+single USB cable.
 
-It is a fork of Raspberry Pi's [debugprobe](https://github.com/raspberrypi/debugprobe) (v2.3.1), extended with a second UART bridge and ESP32 auto-reset.
+It is a fork of Raspberry Pi's [debugprobe](https://github.com/raspberrypi/debugprobe) (v2.3.1), extended with a
+second UART bridge, ESP32 auto-reset and a USB reset interface.
 
 ## What the host sees
 
-The board enumerates as one composite USB device (VID:PID `2e8a:000c`) with three functions:
+The probe enumerates as one composite USB device (VID:PID `2e8a:000c`) with these interfaces:
 
-| Function | Appears as | Used for |
-|---|---|---|
-| CMSIS-DAP v2 | USB vendor interface (WinUSB on Windows, no driver needed) | OpenOCD, pyOCD, probe-rs → SWD targets on J103 |
-| CDC 0 "ESP32 Flash Port (J101)" | Serial port | esptool / PlatformIO / Arduino → ESP32 on J101 |
-| CDC 1 "Debug Log UART (J102)" | Serial port | Terminal → log UART on J102 |
+| Interface | Function | Used for |
+| --- | --- | --- |
+| 0 | CMSIS-DAP v2 (WinUSB on Windows, no driver needed) | OpenOCD, pyOCD, probe-rs → SWD targets |
+| 1 + 2 | CDC 0, ESP32 port | `esptool` / `idf.py` → ESP32 |
+| 3 + 4 | CDC 1, log UART | Serial terminal → any UART target |
+| 5 | Reset | `picotool` reboot into BOOTSEL |
 
-On macOS, the ports appear as `/dev/cu.usbmodem<serial>2` (CDC 0) and `/dev/cu.usbmodem<serial>4` (CDC 1). The USB serial number is 8 hex digits, short enough for macOS to name the ports after the board rather than the USB socket. [macos/ufport](macos/ufport) prints them. On Linux they appear as `/dev/ttyACM*`. Install [udev/99-universalflasher.rules](udev/99-universalflasher.rules) to get the stable names `/dev/probe-esp32` and `/dev/probe-log`.
+The interface numbers are fixed: the udev rules and the Windows `MI_01` / `MI_03` port names depend on them.
 
-## Connectors
+| Host | CDC 0 (ESP32) | CDC 1 (log UART) |
+| --- | --- | --- |
+| macOS | `/dev/cu.usbmodem<serial>2` | `/dev/cu.usbmodem<serial>4` |
+| Linux, with the udev rules | `/dev/probe-esp32` | `/dev/probe-log` |
+| Linux, without | `/dev/ttyACM*` | `/dev/ttyACM*` |
+| Windows | COM port on `MI_01` | COM port on `MI_03` |
 
-All target connectors are 2×5 1.27 mm headers. Target I/O is 3.3 V only.
+On macOS, [macos/ufport](macos/ufport) looks a port up by its interface name, so scripts don't depend on the
+USB socket. Run it without arguments to list every attached probe, or with `esp` or `log` to print one port.
+With several probes attached, set `UF_SERIAL` to the serial number of the one to use.
 
-**J101 – ESP32 (UART boot)**
+On Linux, install the rules in [udev/](udev/) for the stable names and for debugger access without root:
 
-| Pin | Signal | Pin | Signal |
-|---|---|---|---|
-| 1 | +5 V (fused) | 2 | USB D+ (to CN101) |
-| 3 | TXD → ESP32 RX | 4 | EN |
-| 5 | GND | 6 | GND |
-| 7 | BOOT (IO0) | 8 | RXD ← ESP32 TX |
-| 9 | USB D− (to CN101) | 10 | +5 V (fused) |
+```bash
+sudo cp udev/*.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
 
-Pins 2 and 9 pass through to the second USB-C connector (CN101), so the native USB of an ESP32-S3/C3/C6 can be used with a second cable.
+## Pin map
 
-**J102 – Log UART**
+Target I/O is 3.3 V only. The full pin map is in [include/](include/).
 
-| Pin | Signal | Pin | Signal |
-|---|---|---|---|
-| 1 | GND | 2 | TXD → target RX |
-| 3 | RXD ← target TX | 4 | +5 V (fused) |
-| 5 | RTS → target CTS | 6 | CTS ← target RTS |
-
-**J103 – SWD** (standard ARM 10-pin Cortex debug pinout)
-
-| Pin | Signal | Pin | Signal |
-|---|---|---|---|
-| 1 | VTref (target 3.3 V) | 2 | SWDIO |
-| 3 | GND | 4 | SWCLK |
-| 5 | GND | 6 | SWO (not connected) |
-| 9 | GND | 10 | nRESET |
-
-**J100** (Tag-Connect TC2050) is SWD for the RP2040 itself. You can use it to recover the board with an external probe.
-
-## Buttons and LEDs
-
-| | Function |
-|---|---|
-| SW100 | RP2040 BOOTSEL (hold while plugging in USB to update the firmware) |
-| SW101 | ESP32 EN (reset) |
-| SW102 | ESP32 BOOT (IO0) |
-
-| LED | GPIO | Meaning |
-|---|---|---|
-| D104 | – | 3.3 V power |
-| D103 | – | USB overvoltage |
-| D107 | 2 | USB configured by host |
-| D108 | 3 | ESP32 UART activity |
-| D109 / D110 | 18 / 17 | Log UART RX / TX activity |
-| D111 | 15 | Debugger connected (CMSIS-DAP) |
-| D112 | 16 | Target running (CMSIS-DAP) |
+| Function | Signal | GPIO |
+| --- | --- | --- |
+| SWD | SWCLK | 12 |
+| SWD | SWDIO out / SWDIO in | 14 / 13 |
+| SWD | nRESET (open-drain) | 10 |
+| SWD | Target voltage sense (ADC3) | 29 |
+| ESP32 UART | TX / RX | 0 / 1 |
+| ESP32 UART | DTR / RTS (active low, to the EN/IO0 reset circuit) | 8 / 9 |
+| Log UART | TX / RX | 4 / 5 |
+| Log UART | CTS / RTS | 6 / 7 |
+| LED | USB configured | 2 |
+| LED | ESP32 UART activity | 3 |
+| LED | Log UART TX / RX activity | 17 / 18 |
+| LED | Debugger connected / target running | 15 / 16 |
 
 ## Usage
 
 ### ESP32 (CDC 0)
 
-The bridge drives EN and IO0 through the usual cross-coupled transistor pair, the same way a CP2102/CH340 dev board does. Standard tools reset the chip into the bootloader automatically:
+DTR and RTS drive EN and IO0 through the usual cross-coupled transistor pair, the same way a CP2102/CH340 dev
+board does. `esptool` and `idf.py` reset the chip into the bootloader on their own, with their default reset
+settings:
 
+```bash
+esptool --port /dev/probe-esp32 chip-id
+esptool --port /dev/probe-esp32 -b 921600 write-flash 0x0 firmware.bin
+idf.py -p /dev/probe-esp32 flash monitor
 ```
-esptool --port /dev/cu.usbmodemXXXX2 chip-id
-esptool --port /dev/cu.usbmodemXXXX2 -b 921600 write-flash 0x0 firmware.bin
-```
 
-For PlatformIO, set `upload_port` and `monitor_port` to the CDC 0 port. No reset options are needed.
-
-Opening the port in a serial monitor doesn't reset the target. Opening it asserts DTR and RTS together, which leaves both EN and IO0 released.
+Opening the port in a plain serial terminal doesn't reset the target: it asserts DTR and RTS together, which
+leaves both EN and IO0 released. `idf.py monitor` resets the target on purpose when it starts; add `--no-reset`
+to attach to a running target.
 
 ### SWD (CMSIS-DAP)
 
-```
+```bash
 openocd -f interface/cmsis-dap.cfg -f target/stm32f4x.cfg
 pyocd list
 probe-rs list
 ```
 
-Use the target config that matches your MCU. The CMSIS-DAP interface drives nRESET on J103 pin 10.
+Use the target config that matches your MCU. The CMSIS-DAP interface drives nRESET.
 
 ### Log UART (CDC 1)
 
-The log UART is a plain serial port with hardware RTS/CTS flow control. The bridge only runs while the port is open (DTR asserted). An unconnected CTS input is pulled to the active level, so flow control can be left unwired.
+A plain serial port with hardware RTS/CTS flow control. The bridge only runs while the port is open (DTR
+asserted). An unconnected CTS input is pulled to the active level, so flow control can be left unwired.
+
+```bash
+picocom -b 115200 /dev/probe-log
+```
 
 ### AutoBaud (CDC 0)
 
-Set the ESP32 port to the custom baud rate `9728` (`0x2600`). The bridge then measures the incoming data and follows the target's baud rate. Setting any other baud rate turns AutoBaud off.
-
-## Updating the board firmware
-
-1. Hold **SW100** and plug in USB, or run `picotool reboot -u -f` (reset interface, no button needed).
-   The board mounts as a drive called `RPI-RP2`.
-2. Copy `universalflasher.uf2` onto it. The board reboots into the new firmware.
+Set the ESP32 port to the custom baud rate `9728` (`0x2600`). The bridge then measures the incoming data and
+follows the target's baud rate. Setting any other baud rate turns AutoBaud off.
 
 ## Building
 
-You need CMake, an `arm-none-eabi` toolchain that includes newlib (the [Arm GNU Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads); Homebrew's `arm-none-eabi-gcc` is not enough), and [Pico SDK](https://github.com/raspberrypi/pico-sdk) **2.3.0 or newer**.
+| Tool | Version | Notes |
+| --- | --- | --- |
+| CMake | 3.13 or newer | |
+| `arm-none-eabi` toolchain with newlib | | the [Arm GNU Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads); Homebrew's `arm-none-eabi-gcc` lacks newlib |
+| [Pico SDK](https://github.com/raspberrypi/pico-sdk) | **2.3.0 or newer** | found through `PICO_SDK_PATH` |
+| `picotool` | matching the SDK | optional, for flashing without the BOOTSEL button |
 
-```
+Set up the Pico SDK once:
+
+```bash
 git clone https://github.com/raspberrypi/pico-sdk.git --branch 2.3.0 ~/pico-sdk
 git -C ~/pico-sdk submodule update --init
 export PICO_SDK_PATH=~/pico-sdk
-
-git submodule update --init --recursive
-mkdir build && cd build
-cmake ..
-make -j8
 ```
 
-The output is `build/universalflasher.uf2`.
+Then build:
+
+```bash
+git submodule update --init --recursive
+cmake -B build
+cmake --build build -j
+```
+
+The `.uf2` image lands in `build/`. The firmware version embedded in it is the exact git tag, or the short
+commit hash when `HEAD` is not tagged.
+
+## Updating the probe firmware
+
+With `picotool`, no button needed. The probe reboots into BOOTSEL through the reset interface, loads the image
+and starts it:
+
+```bash
+picotool load -f -x build/*.uf2
+```
+
+Without `picotool`, hold BOOTSEL while plugging in USB. The probe mounts as a drive called `RPI-RP2`; copy the
+`.uf2` onto it and it reboots into the new firmware.
 
 ## Repository layout
 
 | Path | Contents |
-|---|---|
-| [include/board_universalflasher_config.h](include/board_universalflasher_config.h) | Pin map for this board |
+| --- | --- |
+| [boards/](boards/) | Pico SDK board definition |
+| [include/](include/) | Pin map and probe configuration |
 | [src/cdc_uart.c](src/cdc_uart.c) | The two USB-UART bridges, DTR/RTS auto-reset |
-| [src/usb_descriptors.c](src/usb_descriptors.c) | USB interfaces (CMSIS-DAP + 2× CDC) |
-| [src/vtarget.c](src/vtarget.c) | Target voltage sense (J103 pin 1, ADC3) |
-| [BRINGUP.md](BRINGUP.md) | Bring-up checklist for a new board |
+| [src/usb_descriptors.c](src/usb_descriptors.c) | USB interfaces (CMSIS-DAP, 2× CDC, reset) |
+| [src/autobaud.c](src/autobaud.c) | AutoBaud on CDC 0 |
+| [src/vtarget.c](src/vtarget.c) | Target voltage sense |
+| [macos/ufport](macos/ufport) | Port lookup by interface name on macOS |
+| [udev/](udev/) | Stable port names and permissions on Linux |
+| `CMSIS_DAP/`, `freertos/` | Vendored CMSIS-DAP sources and the FreeRTOS kernel submodule |
 
 ## License
 
