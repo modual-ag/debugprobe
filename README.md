@@ -11,10 +11,10 @@ The board enumerates as one composite USB device (VID:PID `2e8a:000c`) with thre
 | Function | Appears as | Used for |
 |---|---|---|
 | CMSIS-DAP v2 | USB vendor interface (WinUSB on Windows, no driver needed) | OpenOCD, pyOCD, probe-rs → SWD targets on J103 |
-| CDC 0 "ESP32 Flash Port" | Serial port | esptool / PlatformIO / Arduino → ESP32 on J101 |
-| CDC 1 "Debug Log UART" | Serial port | Terminal → log UART on J102 |
+| CDC 0 "ESP32 Flash Port (J101)" | Serial port | esptool / PlatformIO / Arduino → ESP32 on J101 |
+| CDC 1 "Debug Log UART (J102)" | Serial port | Terminal → log UART on J102 |
 
-On macOS, the ports appear as `/dev/cu.usbmodemXXXX2` (CDC 0) and `/dev/cu.usbmodemXXXX4` (CDC 1). On Linux they appear as `/dev/ttyACM*`. Install [udev/99-universalflasher.rules](udev/99-universalflasher.rules) to get the stable names `/dev/probe-esp32` and `/dev/probe-log`.
+On macOS, the ports appear as `/dev/cu.usbmodem<serial>2` (CDC 0) and `/dev/cu.usbmodem<serial>4` (CDC 1). The USB serial number is 8 hex digits, short enough for macOS to name the ports after the board rather than the USB socket. [macos/ufport](macos/ufport) prints them. On Linux they appear as `/dev/ttyACM*`. Install [udev/99-universalflasher.rules](udev/99-universalflasher.rules) to get the stable names `/dev/probe-esp32` and `/dev/probe-log`.
 
 ## Connectors
 

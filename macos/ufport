@@ -1,0 +1,55 @@
+#!/bin/bash
+# ufport - print the macOS serial port of a UniversalFlasher function.
+#
+# macOS names CDC ports after the USB location (/dev/cu.usbmodem<location><n>), so the
+# name changes with the USB socket or hub. This looks the port up by the interface name
+# the firmware reports instead, which never changes - the macOS stand-in for
+# udev/99-universalflasher.rules.
+#
+#   ufport esp    ESP32 flash port (CDC 0)
+#   ufport log    log UART (CDC 1)
+#   ufport        list every attached flasher
+#
+# Usage: esptool -p "$(ufport esp)" chip-id
+#
+# With several flashers attached, set UF_SERIAL to the USB serial number of the one to use
+# (`ufport` lists them).
+
+set -euo pipefail
+
+ports=$(ioreg -l -w0 | awk '
+    /\+-o .*<class IOUSBHostDevice/ { in_dev = ($0 ~ /UniversalFlasher/); serial = ""; fn = ""; next }
+    !in_dev { next }
+    /"USB Serial Number" = / && serial == "" { serial = $NF; gsub(/"/, "", serial) }
+    /\+-o ESP32 Flash Port( \(J101\))?@/ { fn = "esp" }
+    /\+-o Debug Log UART( \(J102\))?@/   { fn = "log" }
+    /"IOCalloutDevice" = / && fn != "" { dev = $NF; gsub(/"/, "", dev); print serial, fn, dev; fn = "" }
+')
+
+if [ -n "${UF_SERIAL:-}" ]; then
+    ports=$(printf '%s\n' "$ports" | awk -v s="$UF_SERIAL" '$1 == s')
+fi
+
+if [ -z "$ports" ]; then
+    echo "ufport: no UniversalFlasher found${UF_SERIAL:+ with serial $UF_SERIAL}" >&2
+    exit 1
+fi
+
+case "${1:-}" in
+    "")
+        printf '%-18s %-4s %s\n' SERIAL FN PORT
+        printf '%s\n' "$ports" | while read -r s f d; do printf '%-18s %-4s %s\n' "$s" "$f" "$d"; done
+        ;;
+    esp|log)
+        match=$(printf '%s\n' "$ports" | awk -v f="$1" '$2 == f { print $3 }')
+        if [ "$(printf '%s\n' "$match" | wc -l)" -gt 1 ]; then
+            echo "ufport: several flashers attached, set UF_SERIAL (run 'ufport' to list them)" >&2
+            exit 1
+        fi
+        echo "$match"
+        ;;
+    *)
+        echo "usage: ufport [esp|log]" >&2
+        exit 2
+        ;;
+esac

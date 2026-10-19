@@ -28,24 +28,31 @@
 #include "pico/unique_id.h"
 #include "get_serial.h"
 
-/* C string for iSerialNumber in USB Device Descriptor, two chars per byte + terminating NUL */
-char usb_serial[PICO_UNIQUE_BOARD_ID_SIZE_BYTES * 2 + 1];
+/*
+ * C string for iSerialNumber in USB Device Descriptor: the 64-bit flash unique ID folded to 32 bits, as 8 hex
+ * digits + terminating NUL. macOS only names a CDC port after the serial number when it is at most 8 characters
+ * long (/dev/cu.usbmodem<serial><n>); a longer one falls back to the USB location, so the port name would change
+ * with every socket or hub.
+ */
+#define USB_SERIAL_BYTES 4
+char usb_serial[USB_SERIAL_BYTES * 2 + 1];
 
-/* Why a uint8_t[8] array inside a struct instead of an uint64_t an inquiring mind might wonder */
 static pico_unique_board_id_t uID;
 
 void usb_serial_init(void)
 {
+    uint8_t folded[USB_SERIAL_BYTES];
+
     pico_get_unique_board_id(&uID);
 
-    for (int i = 0; i < PICO_UNIQUE_BOARD_ID_SIZE_BYTES * 2; i++)
+    for (int i = 0; i < USB_SERIAL_BYTES; i++)
+        folded[i] = uID.id[i] ^ uID.id[i + USB_SERIAL_BYTES];
+
+    for (int i = 0; i < USB_SERIAL_BYTES * 2; i++)
     {
-        /* Byte index inside the uid array */
-        int bi = i / 2;
-        /* Use high nibble first to keep memory order (just cosmetics) */
-        uint8_t nibble = (uID.id[bi] >> 4) & 0x0F;
-        uID.id[bi] <<= 4;
-        /* Binary to hex digit */
+        /* High nibble first, so the string reads in memory order */
+        uint8_t nibble = (folded[i / 2] >> ((i % 2) ? 0 : 4)) & 0x0F;
         usb_serial[i] = nibble < 10 ? nibble + '0' : nibble + 'A' - 10;
     }
+    usb_serial[USB_SERIAL_BYTES * 2] = '\0';
 }

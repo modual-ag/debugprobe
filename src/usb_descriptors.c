@@ -148,8 +148,8 @@ char const* string_desc_arr [] =
   usb_serial,     // 3: Serial, uses flash unique ID
   "CMSIS-DAP v1 Interface", // 4: Interface descriptor for HID transport
   "CMSIS-DAP v2 Interface", // 5: Interface descriptor for Bulk transport
-  "ESP32 Flash Port",       // 6: Interface descriptor for CDC 0
-  "Debug Log UART",         // 7: Interface descriptor for CDC 1
+  "ESP32 Flash Port (J101)", // 6: Interface descriptor for CDC 0
+  "Debug Log UART (J102)",   // 7: Interface descriptor for CDC 1
 };
 
 static uint16_t _desc_str[32];
