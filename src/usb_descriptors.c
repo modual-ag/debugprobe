@@ -28,6 +28,7 @@
 #include "tusb.h"
 #include "get_serial.h"
 #include "probe_config.h"
+#include "pico/usb_reset.h"
 
 //--------------------------------------------------------------------+
 // Device Descriptors
@@ -73,6 +74,7 @@ enum
   ITF_NUM_CDC0_DATA,
   ITF_NUM_CDC1_COM,  // Log UART
   ITF_NUM_CDC1_DATA,
+  ITF_NUM_RESET,     // after the CDCs, so they keep interfaces 1-4 (udev rules, Windows MI_01/MI_03)
   ITF_NUM_TOTAL
 };
 
@@ -88,7 +90,7 @@ enum
 #if (PROBE_DEBUG_PROTOCOL == PROTO_DAP_V1)
 #define CONFIG_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + 2 * TUD_CDC_DESC_LEN + TUD_HID_INOUT_DESC_LEN)
 #else
-#define CONFIG_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + 2 * TUD_CDC_DESC_LEN + TUD_VENDOR_DESC_LEN)
+#define CONFIG_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + 2 * TUD_CDC_DESC_LEN + TUD_VENDOR_DESC_LEN + TUD_RPI_RESET_DESC_LEN)
 #endif
 
 static uint8_t const desc_hid_report[] =
@@ -120,6 +122,8 @@ uint8_t desc_configuration[] =
   TUD_CDC_DESCRIPTOR(ITF_NUM_CDC0_COM, 6, CDC0_NOTIFICATION_EP_NUM, 64, CDC0_DATA_OUT_EP_NUM, CDC0_DATA_IN_EP_NUM, 64),
   // Interface 3 + 4: CDC 1, log UART
   TUD_CDC_DESCRIPTOR(ITF_NUM_CDC1_COM, 7, CDC1_NOTIFICATION_EP_NUM, 64, CDC1_DATA_OUT_EP_NUM, CDC1_DATA_IN_EP_NUM, 64),
+  // Interface 5: reset interface (picotool reboot)
+  TUD_RPI_RESET_DESCRIPTOR(ITF_NUM_RESET, 8),
 };
 
 // Invoked when received GET CONFIGURATION DESCRIPTOR
@@ -129,7 +133,7 @@ uint8_t const * tud_descriptor_configuration_cb(uint8_t index)
 {
   (void) index; // for multiple configurations
   /* Hack in CAP_BREAK support for both CDC interfaces */
-  uint32_t cdc_base = CONFIG_TOTAL_LEN - 2 * TUD_CDC_DESC_LEN;
+  uint32_t cdc_base = CONFIG_TOTAL_LEN - TUD_RPI_RESET_DESC_LEN - 2 * TUD_CDC_DESC_LEN;
   desc_configuration[cdc_base + 8 + 9 + 5 + 5 + 4 - 1] = 0x6;
   desc_configuration[cdc_base + TUD_CDC_DESC_LEN + 8 + 9 + 5 + 5 + 4 - 1] = 0x6;
   return desc_configuration;
@@ -150,6 +154,7 @@ char const* string_desc_arr [] =
   "CMSIS-DAP v2 Interface", // 5: Interface descriptor for Bulk transport
   "ESP32 Flash Port (J101)", // 6: Interface descriptor for CDC 0
   "Debug Log UART (J102)",   // 7: Interface descriptor for CDC 1
+  "Reset",                   // 8: Interface descriptor for Reset
 };
 
 static uint16_t _desc_str[32];
@@ -208,7 +213,8 @@ will insert "DeviceInterfaceGUIDs" multistring property.
 https://developers.google.com/web/fundamentals/native-hardware/build-for-webusb/
 (Section Microsoft OS compatibility descriptors)
 */
-#define MS_OS_20_DESC_LEN  0xB2
+#define MS_OS_FEATURE_DESC_LEN 0xA0
+#define MS_OS_20_DESC_LEN  (0x0A + 0x08 + MS_OS_FEATURE_DESC_LEN + RPI_RESET_MS_OS_20_DESC_LEN)
 
 #define BOS_TOTAL_LEN      (TUD_BOS_DESC_LEN + TUD_BOS_MICROSOFT_OS_DESC_LEN)
 
@@ -230,14 +236,14 @@ uint8_t const desc_ms_os_20[] =
   U16_TO_U8S_LE(0x0008), U16_TO_U8S_LE(MS_OS_20_SUBSET_HEADER_CONFIGURATION), 0, 0, U16_TO_U8S_LE(MS_OS_20_DESC_LEN-0x0A),
 
   // Function Subset header: length, type, first interface, reserved, subset length
-  U16_TO_U8S_LE(0x0008), U16_TO_U8S_LE(MS_OS_20_SUBSET_HEADER_FUNCTION), ITF_NUM_PROBE, 0, U16_TO_U8S_LE(MS_OS_20_DESC_LEN-0x0A-0x08),
+  U16_TO_U8S_LE(0x0008), U16_TO_U8S_LE(MS_OS_20_SUBSET_HEADER_FUNCTION), ITF_NUM_PROBE, 0, U16_TO_U8S_LE(MS_OS_FEATURE_DESC_LEN),
 
   // MS OS 2.0 Compatible ID descriptor: length, type, compatible ID, sub compatible ID
   U16_TO_U8S_LE(0x0014), U16_TO_U8S_LE(MS_OS_20_FEATURE_COMPATBLE_ID), 'W', 'I', 'N', 'U', 'S', 'B', 0x00, 0x00,
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // sub-compatible
 
   // MS OS 2.0 Registry property descriptor: length, type
-  U16_TO_U8S_LE(MS_OS_20_DESC_LEN-0x0A-0x08-0x08-0x14), U16_TO_U8S_LE(MS_OS_20_FEATURE_REG_PROPERTY),
+  U16_TO_U8S_LE(MS_OS_FEATURE_DESC_LEN-0x08-0x14), U16_TO_U8S_LE(MS_OS_20_FEATURE_REG_PROPERTY),
   U16_TO_U8S_LE(0x0007), U16_TO_U8S_LE(0x002A), // wPropertyDataType, wPropertyNameLength and PropertyName "DeviceInterfaceGUIDs\0" in UTF-16
   'D', 0x00, 'e', 0x00, 'v', 0x00, 'i', 0x00, 'c', 0x00, 'e', 0x00, 'I', 0x00, 'n', 0x00, 't', 0x00, 'e', 0x00,
   'r', 0x00, 'f', 0x00, 'a', 0x00, 'c', 0x00, 'e', 0x00, 'G', 0x00, 'U', 0x00, 'I', 0x00, 'D', 0x00, 's', 0x00, 0x00, 0x00,
@@ -246,7 +252,9 @@ uint8_t const desc_ms_os_20[] =
   '{', 0x00, 'C', 0x00, 'D', 0x00, 'B', 0x00, '3', 0x00, 'B', 0x00, '5', 0x00, 'A', 0x00, 'D', 0x00, '-', 0x00,
   '2', 0x00, '9', 0x00, '3', 0x00, 'B', 0x00, '-', 0x00, '4', 0x00, '6', 0x00, '6', 0x00, '3', 0x00, '-', 0x00,
   'A', 0x00, 'A', 0x00, '3', 0x00, '6', 0x00, '-', 0x00, '1', 0x00, 'A', 0x00, 'A', 0x00, 'E', 0x00, '4', 0x00,
-  '6', 0x00, '4', 0x00, '6', 0x00, '3', 0x00, '7', 0x00, '7', 0x00, '6', 0x00, '}', 0x00, 0x00, 0x00, 0x00, 0x00
+  '6', 0x00, '4', 0x00, '6', 0x00, '3', 0x00, '7', 0x00, '7', 0x00, '6', 0x00, '}', 0x00, 0x00, 0x00, 0x00, 0x00,
+
+  RPI_RESET_MS_OS_20_DESCRIPTOR(ITF_NUM_RESET)
 };
 
 TU_VERIFY_STATIC(sizeof(desc_ms_os_20) == MS_OS_20_DESC_LEN, "Incorrect size");

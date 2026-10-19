@@ -63,7 +63,7 @@ do { \
 #define probe_dump(format,...) ((void)0)
 #endif
 
-#include "board_universalflasher_config.h"
+#include "board_config.h"
 
 // Add the configuration to binary information
 void bi_decl_config();

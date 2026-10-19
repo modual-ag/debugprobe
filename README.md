@@ -104,15 +104,16 @@ Set the ESP32 port to the custom baud rate `9728` (`0x2600`). The bridge then me
 
 ## Updating the board firmware
 
-1. Hold **SW100** and plug in USB. The board mounts as a drive called `RPI-RP2`.
+1. Hold **SW100** and plug in USB, or run `picotool reboot -u -f` (reset interface, no button needed).
+   The board mounts as a drive called `RPI-RP2`.
 2. Copy `universalflasher.uf2` onto it. The board reboots into the new firmware.
 
 ## Building
 
-You need CMake, an `arm-none-eabi` toolchain that includes newlib (the [Arm GNU Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads); Homebrew's `arm-none-eabi-gcc` is not enough), and [Pico SDK](https://github.com/raspberrypi/pico-sdk) 2.x.
+You need CMake, an `arm-none-eabi` toolchain that includes newlib (the [Arm GNU Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads); Homebrew's `arm-none-eabi-gcc` is not enough), and [Pico SDK](https://github.com/raspberrypi/pico-sdk) **2.3.0 or newer**.
 
 ```
-git clone https://github.com/raspberrypi/pico-sdk.git --branch 2.1.1 ~/pico-sdk
+git clone https://github.com/raspberrypi/pico-sdk.git --branch 2.3.0 ~/pico-sdk
 git -C ~/pico-sdk submodule update --init
 export PICO_SDK_PATH=~/pico-sdk
 

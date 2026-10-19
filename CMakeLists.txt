@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.12)
 
+# build for the UniversalFlasher; its board header lives in boards/
+set(PICO_BOARD universalflasher CACHE STRING "Board type")
+list(APPEND PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/boards)
+
 set(CMAKE_BUILD_TYPE RelWithDebInfo)
 
 include(pico_sdk_import.cmake)
@@ -10,10 +14,6 @@ include(FreeRTOS_Kernel_import.cmake)
 project(debugprobe)
 
 pico_sdk_init()
-
-if (${PICO_SDK_VERSION_MAJOR} LESS 2)
-	message(SEND_ERROR "Version 2 of the Pico SDK is required to compile this project. Please update your installation at ${PICO_SDK_PATH}")
-endif ()
 
 add_executable(debugprobe
         src/probe_config.c
@@ -64,6 +64,7 @@ add_dependencies(debugprobe version)
 
 target_compile_definitions (debugprobe PRIVATE
 	PICO_RP2040_USB_DEVICE_ENUMERATION_FIX=1
+    PICO_ENABLE_USB_RESET_VIA_VENDOR_INTERFACE=1
 )
 
 set_target_properties(debugprobe PROPERTIES
@@ -76,6 +77,7 @@ pico_enable_stdio_uart(debugprobe 0)
 target_link_libraries(debugprobe PRIVATE
         pico_multicore
         pico_stdlib
+        pico_usb_reset
         pico_unique_id
         tinyusb_device
         tinyusb_board
