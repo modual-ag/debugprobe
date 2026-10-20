@@ -128,12 +128,21 @@ commit hash when `HEAD` is not tagged.
 
 ## Updating the probe firmware
 
-With `picotool`, no button needed. The probe reboots into BOOTSEL through the reset interface, loads the image
-and starts it:
+With `picotool`, no button needed. Reboot the probe into BOOTSEL through the reset interface, then load the
+image and start it:
 
 ```bash
-picotool load -f -x build/*.uf2
+picotool reboot -u -f --vid 0x2e8a --pid 0x000c
+picotool load -x build/universalflasher.uf2
 ```
+
+The first command reports that no BOOTSEL device was found even though the probe did reboot into BOOTSEL; ignore
+it. Two things keep `picotool load -f` from doing this in one step:
+
+- `picotool` skips Raspberry Pi devices with a product ID it doesn't know, which includes the Debug Probe's
+  `0x000c`, unless `--vid` and `--pid` name it.
+- After the reboot, `picotool` waits for a BOOTSEL device with the probe's 8-character USB serial, but the
+  RP2040 boot ROM reports the full 16-character flash ID, so it never finds a match.
 
 Without `picotool`, hold BOOTSEL while plugging in USB. The probe mounts as a drive called `RPI-RP2`; copy the
 `.uf2` onto it and it reboots into the new firmware.
