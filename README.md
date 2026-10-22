@@ -37,6 +37,19 @@ sudo cp udev/*.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
+With several probes attached, `/dev/probe-esp32` and `/dev/probe-log` point to the last one plugged in. Use
+`/dev/probe/<serial>-esp32` and `/dev/probe/<serial>-log` to pick a specific probe. The serial ports belong to the
+`dialout` group, so add yourself to it (`sudo usermod -aG dialout $USER`) and log in again.
+
+To bind `/dev/probe` into a container, the directory has to outlive an unplug: udev deletes it with the last link, and
+the container keeps the deleted directory until it restarts. [udev/universalflasher-tmpfiles.conf](udev/universalflasher-tmpfiles.conf)
+puts a file in it that stops the deletion:
+
+```bash
+sudo cp udev/universalflasher-tmpfiles.conf /etc/tmpfiles.d/universalflasher.conf
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/universalflasher.conf
+```
+
 ## Pin map
 
 Target I/O is 3.3 V only. The full pin map is in [include/](include/).

@@ -6,9 +6,19 @@
 #
 # Interfaces: 0 = CMSIS-DAP v2, 1/2 = CDC 0 (ESP32), 3/4 = CDC 1 (log UART)
 
-# Stable names for the two serial ports
-SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000c", ENV{ID_USB_INTERFACE_NUM}=="01", SYMLINK+="probe-esp32"
-SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000c", ENV{ID_USB_INTERFACE_NUM}=="03", SYMLINK+="probe-log"
+ACTION=="remove", GOTO="universalflasher_end"
+# ENV, not ATTRS: ATTRS{}!= matches any parent, so the upstream hub's vendor ID would always skip the rules
+ENV{ID_VENDOR_ID}!="2e8a", GOTO="universalflasher_end"
+ENV{ID_MODEL_ID}!="000c", GOTO="universalflasher_end"
 
-# Allow OpenOCD/pyOCD/probe-rs access without root
-SUBSYSTEM=="usb", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000c", MODE="0666", GROUP="plugdev", TAG+="uaccess"
+# Short names for single-board use (the last board attached wins) plus per-serial names for several boards at once
+SUBSYSTEM=="tty", ENV{ID_USB_INTERFACE_NUM}=="01", SYMLINK+="probe-esp32 probe/$env{ID_SERIAL_SHORT}-esp32", GROUP="dialout", MODE="0660"
+SUBSYSTEM=="tty", ENV{ID_USB_INTERFACE_NUM}=="03", SYMLINK+="probe-log probe/$env{ID_SERIAL_SHORT}-log", GROUP="dialout", MODE="0660"
+
+# Keep ModemManager from sending AT commands to the target
+SUBSYSTEM=="tty", ENV{ID_MM_DEVICE_IGNORE}="1"
+
+# CMSIS-DAP access for OpenOCD/pyOCD/probe-rs without root
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", MODE="0666"
+
+LABEL="universalflasher_end"
